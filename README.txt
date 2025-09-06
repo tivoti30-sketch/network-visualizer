@@ -1,6 +1,6 @@
-№Works well on Linux
+# Works well on Linux
 
-№Windows has bugs, still being improved
+# Windows has bugs, still being improved
 
 
 Ubuntu
@@ -18,7 +18,7 @@ pip install -r requirements.txt
 
 
 
-#Start
+# Start
 source .venv/bin/activate
 
 cd APP
