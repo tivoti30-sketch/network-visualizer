@@ -1,3 +1,8 @@
+№Works well on Linux
+
+№Windows has bugs, still being improved
+
+
 Ubuntu
 sudo apt install traceroute
 
