@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🌳 Дерево сетевых путей — Network Visualizer</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    .paths-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 24px; background: var(--bg-white); border-bottom: 1px solid var(--border-color); }
+    .paths-toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+    .paths-toolbar .view-btn { padding: 8px 12px; font-size: 14px; }
+    .paths-layout { display: flex; gap: 12px; align-items: stretch; padding: 12px; }
+    .sidebar { flex: 0 0 320px; border-right: 1px solid var(--border-color); padding-right: 12px; }
+    .sidebar h3 { font-size: 1rem; margin-bottom: 8px; color: #2c3e50; }
+    .sidebar .controls { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+    .sidebar .list { max-height: 480px; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+    .hist-item { display: grid; grid-template-columns: 20px 1fr auto; gap: 8px; align-items: center; padding: 6px; border: 1px solid var(--border-color); border-radius: 6px; background: #fff; }
+    .hist-item small { color: #7f8c8d; font-size: 12px; }
+    .selected-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .tag { background: #e8f4fc; color: #2c3e50; border: 1px solid #b8daff; border-radius: 12px; padding: 2px 8px; font-size: 12px; }
+
+    .tree-area { flex: 1 1 auto; min-height: 520px; }
+    .paths-tree-svg .node text { font-size: 12px; fill: #2c3e50; }
+    .paths-tree-svg .node circle { stroke: #2c3e50; stroke-width: 1px; }
+    .paths-tooltip { position: fixed; pointer-events: none; background: rgba(0,0,0,0.8); color: #fff; font-size: 12px; padding: 6px 8px; border-radius: 4px; z-index: 10000; opacity: 0; transition: opacity 0.1s; }
+
+    /* Командная форма (как на index) */
+    .command-form { background: var(--bg-white); padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; margin: 12px; }
+    .command-form .input-group { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .command-form label { font-weight: 600; color: #2c3e50; }
+    .command-form input { flex: 1 1 420px; min-width: 240px; padding: 8px; border: 1px solid var(--border-color); border-radius: 6px; }
+    .command-form .submit-btn { padding: 8px 12px; background: var(--secondary-color); color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
+    .command-examples { margin-top: 6px; color: #7f8c8d; font-size: 12px; }
+    .command-examples code { background: var(--bg-light); border: 1px solid var(--border-color); padding: 2px 6px; border-radius: 6px; cursor: pointer; margin-right: 6px; display: inline-block; }
+
+    .output-section { margin: 12px; background: var(--bg-white); border: 1px solid var(--border-color); border-radius: 8px; }
+    .output-section .section-header { padding: 8px 12px; border-bottom: 1px solid var(--border-color); }
+    .output-box { background: #1e1e1e; color: #d4d4d4; padding: 12px; font-family: 'Courier New', monospace; white-space: pre-wrap; overflow-x: auto; max-height: 300px; overflow-y: auto; font-size: 0.9em; line-height: 1.4; }
+  </style>
+</head>
+<body data-page="paths">
+  <div class="container">
+    <header class="header">
+      <h1>🌳 Дерево сетевых путей</h1>
+      <p class="subtitle">Одно большое дерево (агрегированная цепочка), можно формировать из выбранной истории</p>
+    </header>
+
+    <section class="paths-header">
+      <div class="paths-toolbar">
+        <a class="view-btn" href="/">
+          <span class="btn-icon">🏠</span>
+          На главную
+        </a>
+        <button class="view-btn" id="refreshBtn">
+          <span class="btn-icon">🔄</span>
+          Обновить
+        </button>
+        <button class="view-btn" id="exportBtn">
+          <span class="btn-icon">💾</span>
+          Экспорт JSON
+        </button>
+        <button class="view-btn" id="clearDBBtn">
+          <span class="btn-icon">🗑️</span>
+          Очистить дерево (БД)
+        </button>
+      </div>
+      <div class="result-meta">
+        <span class="meta-item">🎯 Целей: <strong id="targetsCount">0</strong></span>
+        <span class="meta-item">🔗 Хопов: <strong id="hopsCount">0</strong></span>
+        <span class="meta-item">🌿 Узлов дерева: <strong id="nodesCount">0</strong></span>
+      </div>
+    </section>
+
+    <!-- Форма ввода команды как на index -->
+    <form id="pathsCommandForm" class="command-form">
+      <div class="input-group">
+        <label for="pathsCommandInput">💻 Введите сетевую команду:</label>
+        <input type="text" id="pathsCommandInput" placeholder="Введите команду (traceroute / tracert)" value="traceroute " required />
+        <button type="submit" class="submit-btn">🚀 Выполнить</button>
+      </div>
+      <div class="command-examples">
+        Примеры:
+        <code class="example-cmd">traceroute 8.8.8.8</code>
+        <code class="example-cmd">traceroute google.com</code>
+        <code class="example-cmd">tracert example.com</code>
+      </div>
+
+      <div class="batch-section" style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+        <label for="pathsIpListInput">📦 Список IP/доменов для пакетной трассировки (по одному в строке или через запятую):</label>
+        <textarea id="pathsIpListInput" rows="4" placeholder="Например:\n8.8.8.8\n1.1.1.1\nexample.com" style="width: 100%;"></textarea>
+        <div class="batch-options" style="display: flex; gap: 12px; align-items: center; margin-top: 8px; flex-wrap: wrap;">
+          <label style="display:flex; align-items:center; gap:6px;">
+            <input type="checkbox" id="pathsBatchNumeric"> -n (только IP)
+          </label>
+          <label>
+            Макс. хопов: <input type="number" id="pathsBatchMaxHops" min="1" max="64" step="1" style="width: 80px;">
+          </label>
+          <label>
+            Таймаут (сек): <input type="number" id="pathsBatchWaitSec" min="1" max="30" step="1" style="width: 80px;" placeholder="2">
+          </label>
+          <button type="button" id="pathsRunBatchBtn" class="submit-btn" style="margin-left:auto;">
+            <span class="btn-icon">🧰</span>
+            Пакетная трассировка
+          </button>
+        </div>
+
+        
+        <small class="hint">Лимит: до 50 целей за один запуск</small>
+      </div>
+    </form>
+
+    <div class="output-section">
+      <div class="section-header"><h4>📄 Сырой вывод</h4></div>
+      <div id="pathsRawOutput" class="output-box"><div class="placeholder"><div class="placeholder-icon">📝</div><p>Здесь будет вывод пакетной трассировки</p></div></div>
+    </div>
+
+    <section class="paths-layout">
+      <aside class="sidebar">
+        <h3>📝 История трассировок</h3>
+        <div class="controls">
+          <button class="view-btn" id="selectNoneBtn">Снять выделение</button>
+          <button class="view-btn" id="buildSelectedBtn">Построить из выбранного</button>
+        </div>
+        <div id="historyList" class="list">
+          <div class="placeholder">
+            <div class="placeholder-icon">⏳</div>
+            <p>Загрузка истории...</p>
+          </div>
+        </div>
+        <div class="selected-tags" id="selectedTags"></div>
+      </aside>
+
+      <div class="tree-area">
+        <div id="pathsContainer" class="paths-container">
+          <div class="placeholder">
+            <div class="placeholder-icon">🌍</div>
+            <p>Загрузка дерева путей...</p>
+          </div>
+        </div>
+
+        </div>
+    </section>
+
+    <footer class="footer">
+      <div class="footer-content">
+        <div class="footer-section">
+          <h4>🌐 Network Visualizer</h4>
+          <p>Визуализация сетевой топологии на основе ваших команд</p>
+        </div>
+        <div class="footer-section">
+          <h4>Навигация</h4>
+          <div class="quick-actions">
+            <a class="quick-btn" href="/">🏠 Главная</a>
+          </div>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <p>© 2024 Network Visualizer</p>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    // --------------- API ---------------
+    async function apiGetPaths() {
+      const resp = await fetch('/api/paths');
+      if (!resp.ok) throw new Error('Ошибка загрузки путей');
+      return await resp.json();
+    }
+    async function apiGetHistory() {
+      const resp = await fetch('/api/paths_history');
+      if (!resp.ok) throw new Error('Ошибка загрузки истории');
+      return await resp.json();
+    }
+    async function apiGetHistoryDetails(id) {
+      const resp = await fetch(`/api/paths_history/${id}`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Ошибка загрузки деталей');
+      return data; // {command, target, hops: [...{hop, hostname, ip, ...}]}
+    }
+    async function apiClearPathsDB() {
+      const resp = await fetch('/api/clear_paths', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error((data && data.error) || 'Ошибка очистки БД дерева');
+      return data;
+    }
+    async function apiRunCommand(command) {
+      const resp = await fetch('/api/paths_run_command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command }) });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data && data.error ? data.error : 'Ошибка выполнения команды');
+      return data;
+    }
+
+    
+    // Пакетный запуск traceroute для страницы paths
+    async function handlePathsBatchRun() {
+      const raw = (document.getElementById('pathsIpListInput')?.value || '');
+      const list = raw.split(/[\n\r,; \t]+/).map(s => s.trim()).filter(Boolean);
+      if (list.length === 0) {
+        alert('Введите список IP/доменов');
+        return;
+      }
+      if (list.length > 50) {
+        alert('Слишком много целей (макс. 50)');
+        return;
+      }
+      const numeric = !!document.getElementById('pathsBatchNumeric')?.checked;
+      const maxHopsVal = parseInt(document.getElementById('pathsBatchMaxHops')?.value || '', 10);
+      const waitSecVal = parseInt(document.getElementById('pathsBatchWaitSec')?.value || '', 10);
+      const ms = Number.isFinite(waitSecVal) && waitSecVal > 0 ? (waitSecVal * 1000) : null; // сервер Linux ожидает -w в мс для конвертации
+
+      const outputs = [];
+      const rawBox = document.getElementById('pathsRawOutput');
+      if (rawBox) rawBox.textContent = 'Старт пакетной трассировки...';
+
+      for (let i = 0; i < list.length; i++) {
+        const target = list[i];
+        const parts = ['traceroute'];
+        if (numeric) parts.push('-n');
+        if (Number.isFinite(maxHopsVal) && maxHopsVal > 0) { parts.push('-m', String(maxHopsVal)); }
+        if (ms && ms > 0) { parts.push('-w', String(ms)); }
+        parts.push(target);
+        const cmd = parts.join(' ');
+
+        try {
+          const data = await apiRunCommand(cmd);
+          const head = `=== [${i+1}/${list.length}] ${target} — ${cmd} (code ${data.returncode}) ===`;
+          const body = (data.raw_stdout && String(data.raw_stdout).trim()) ? data.raw_stdout : (data.raw_stderr || '');
+          outputs.push(`${head}\n${body}`.trim());
+        } catch (e) {
+          outputs.push(`=== [${i+1}/${list.length}] ${target} — ${cmd} ===\nОшибка: ${e.message}`);
+        }
+        if (rawBox) rawBox.textContent = outputs.join('\n\n');
+      }
+
+      try {
+        await loadHistorySidebar();
+        await buildFromDB();
+      } catch {}
+    }
+
+    // --------------- STATE ---------------
+    const selectedIds = new Set();
+    const detailsCache = new Map(); // id -> details
+
+    // --------------- RENDER HISTORY ---------------
+    async function loadHistorySidebar() {
+      const list = document.getElementById('historyList');
+      list.innerHTML = '<div class="loading">Загрузка...</div>';
+      try {
+        const data = await apiGetHistory();
+        const history = data.history || [];
+        if (history.length === 0) {
+          list.innerHTML = '<div class="placeholder"><div class="placeholder-icon">🗂️</div><p>История пуста</p></div>';
+          return;
+        }
+        // сортировка по времени (новые сверху)
+        history.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+        // Удаление дубликатов по цели (источник один — сервер)
+        const seen = new Set();
+        const unique = [];
+        for (const item of history) {
+          const key = (item.target || 'unknown').trim().toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          unique.push(item);
+        }
+        list.innerHTML = unique.map(item => `
+          <label class="hist-item">
+            <input type="checkbox" data-id="${item.id}" ${selectedIds.has(item.id) ? 'checked' : ''} />
+            <div>
+              <div><strong>${item.target || 'unknown'}</strong></div>
+              <small>#${item.id} · ${item.hops_count} хоп(ов)</small>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <small>${new Date(item.timestamp).toLocaleString('ru-RU')}</small>
+              <button type="button" class="view-btn" data-del-id="${item.id}" title="Удалить маршрут" style="padding:2px 6px;font-size:12px;line-height:1;height:22px;min-width:auto">🗑️</button>
+            </div>
+          </label>
+        `).join('');
+        list.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+          cb.addEventListener('change', async (e) => {
+            const id = Number(e.target.getAttribute('data-id'));
+            if (e.target.checked) {
+              selectedIds.add(id);
+              try {
+                if (!detailsCache.has(id)) {
+                  const det = await apiGetHistoryDetails(id);
+                  detailsCache.set(id, det);
+                }
+              } catch(err) {
+                alert('Не удалось загрузить детали истории #' + id);
+                selectedIds.delete(id);
+                e.target.checked = false;
+              }
+            } else {
+              selectedIds.delete(id);
+            }
+            renderSelectedTags();
+          });
+        });
+        list.querySelectorAll('button[data-del-id]').forEach(btn => {
+          btn.addEventListener('click', async (e) => {
+            const id = Number(e.currentTarget.getAttribute('data-del-id'));
+            if (!id) return;
+            if (!confirm('Удалить маршрут #' + id + ' из истории?')) return;
+            try {
+              const resp = await fetch(`/api/paths_history/${id}`, { method: 'DELETE' });
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok) throw new Error((data && data.error) || 'Ошибка удаления');
+              selectedIds.delete(id);
+              detailsCache.delete(id);
+              await loadHistorySidebar();
+              await buildFromDB();
+            } catch (err) {
+              alert(err.message || 'Не удалось удалить маршрут');
+            }
+          });
+        });
+        renderSelectedTags();
+      } catch (e) {
+        list.innerHTML = `<div class="error">Ошибка истории: ${e.message}</div>`;
+      }
+    }
+
+    function renderSelectedTags() {
+      const cont = document.getElementById('selectedTags');
+      const ids = Array.from(selectedIds.values());
+      cont.innerHTML = ids.map(id => `<span class="tag">#${id}</span>`).join('');
+    }
+
+    // --------------- BUILD TREE DATA ---------------
+    function buildBranchingRootFromRuns(runs) {
+      const root = { name: 'Все пути', children: [] };
+      (runs || []).forEach(run => {
+        let parent = root;
+        const hops = Array.isArray(run && run.hops) ? run.hops : [];
+        hops.forEach(h => {
+          const hopNum = Number(h.hop);
+          if (!Number.isFinite(hopNum)) return;
+          const rawHost = (h.hostname || '').trim();
+          const rawIp = (h.ip || '').trim();
+          const validHost = !!rawHost && rawHost !== '*' && rawHost !== 'Неизвестный узел';
+          const validIp = !!rawIp && rawIp !== 'Таймаут' && rawIp !== 'N/A';
+          const host = validHost ? rawHost : null;
+          const ip = validIp ? rawIp : null;
+          const label = host ? host : (ip ? ip : '');
+          parent.children = parent.children || [];
+          let node = parent.children.find(ch => (
+            ch && (ch.host || null) === host && (ch.ip || null) === ip && (ch.label || '') === label
+          ));
+          if (!node) {
+            node = { name: String(hopNum), host, ip, label, children: [] };
+            parent.children.push(node);
+          }
+          parent = node;
+        });
+      });
+      return root;
+    }
+
+    // --------------- TREE RENDER ---------------
+    function wrapLabelText(textSelection, text, maxCharsPerLine, maxLines) {
+      const content = String(text || '');
+      if (!content) { textSelection.text(''); return; }
+      const chunks = [];
+      let rest = content.trim();
+      while (rest.length > 0 && chunks.length < maxLines) {
+        let slice = rest.slice(0, maxCharsPerLine);
+        const lastSpace = slice.lastIndexOf(' ');
+        if (lastSpace > 10) slice = slice.slice(0, lastSpace);
+        chunks.push(slice);
+        rest = rest.slice(slice.length).trimStart();
+      }
+      if (rest.length > 0 && chunks.length > 0) {
+        chunks[chunks.length - 1] = chunks[chunks.length - 1].replace(/\s+$/, '') + '…';
+      }
+      textSelection.text(null);
+      const baseX = textSelection.attr('x') || 0;
+      chunks.forEach((line, i) => {
+        textSelection.append('tspan')
+          .attr('x', baseX)
+          .attr('dy', i === 0 ? '0em' : '1.2em')
+          .style('font-size', '12px')
+          .text(line);
+      });
+      if (chunks.length === 0) {
+        textSelection.text(content);
+      }
+    }
+
+    function shiftSubtree(node, delta) {
+      node.x += delta;
+      if (node.children) node.children.forEach(ch => shiftSubtree(ch, delta));
+    }
+
+    function resolveCollisions(root) {
+      const levels = new Map();
+      root.descendants().forEach(n => {
+        const list = levels.get(n.depth) || [];
+        list.push(n);
+        levels.set(n.depth, list);
+      });
+      levels.forEach(nodes => {
+        nodes.sort((a, b) => a.x - b.x);
+        for (let i = 1; i < nodes.length; i++) {
+          const prev = nodes[i - 1];
+          const curr = nodes[i];
+          const getEffLen = (d) => {
+            const label = (d.data && d.data.label) ? String(d.data.label) : '';
+            const ip = (d.data && d.data.ip) ? String(d.data.ip) : '';
+            return Math.max(label.length, ip.length);
+          };
+          const lenPrev = getEffLen(prev);
+          const lenCurr = getEffLen(curr);
+          const linesPrev = Math.ceil(lenPrev / 18);
+          const linesCurr = Math.ceil(lenCurr / 18);
+          const minGap = 50 + (linesPrev + linesCurr) * 14;
+          const diff = curr.x - prev.x;
+          if (diff < minGap) {
+            const delta = minGap - diff;
+            shiftSubtree(curr, delta);
+          }
+        }
+      });
+    }
+
+    function renderTreeFromRoot(container, rootData) {
+      container.innerHTML = '';
+      const width = container.clientWidth || 1000;
+      const margin = { top: 20, right: 120, bottom: 20, left: 120 };
+
+      const root = d3.hierarchy(rootData);
+      const totalNodes = (function count(d){ let c=1; (d.children||[]).forEach(ch=>c+=count(ch)); return c; })(rootData);
+      const height = Math.max(800, Math.min(4000, totalNodes * 26));
+
+      const svg = d3.select(container)
+        .append('svg')
+        .attr('class', 'paths-tree-svg')
+        .attr('width', width)
+        .attr('height', height);
+
+      const zoomGroup = svg.append('g').attr('class', 'zoom-group');
+      const g = zoomGroup.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+      const zoom = d3.zoom().scaleExtent([0.4, 4]).on('zoom', (event) => {
+        zoomGroup.attr('transform', event.transform);
+        updateLabelVisibility(event.transform.k);
+      });
+      svg.call(zoom);
+
+      const tree = d3.tree()
+        .size([height - margin.top - margin.bottom, width - margin.left - margin.right])
+        .separation((a, b) => {
+          const getLen = (d) => {
+            const label = (d.data && d.data.label) ? String(d.data.label) : '';
+            const ip = (d.data && d.data.ip) ? String(d.data.ip) : '';
+            return Math.max(label.length, ip.length);
+          };
+          const la = getLen(a);
+          const lb = getLen(b);
+          const base = (a.parent === b.parent) ? 2.0 : 3.0;
+          return base + (la + lb) / 30;
+        });
+
+      tree(root);
+      resolveCollisions(root);
+
+      // Links
+      g.selectAll('.link')
+        .data(root.links())
+        .enter().append('path')
+        .attr('class', 'link')
+        .attr('fill', 'none')
+        .attr('stroke', '#3498db')
+        .attr('stroke-width', 1.5)
+        .attr('d', d3.linkHorizontal().x(d => d.y).y(d => d.x));
+
+      // Nodes
+      const node = g.selectAll('.node')
+        .data(root.descendants())
+        .enter().append('g')
+        .attr('class', 'node')
+        .attr('transform', d => `translate(${d.y},${d.x})`);
+
+      node.append('circle')
+        .attr('r', d => d.depth === 0 ? 6 : 4)
+        .attr('fill', d => {
+          if (d.depth === 0) return '#27ae60';
+          const hasChildren = d.children || (d.data.children && d.data.children.length);
+          return hasChildren ? '#3498db' : '#e74c3c';
+        })
+        .attr('stroke', '#2c3e50')
+        .attr('stroke-width', 1);
+
+      // Group labels
+      const labelGroup = node.append('g').attr('class', 'label-group');
+
+      // DNS/Hostname label
+      labelGroup.append('text')
+        .attr('class', 'dns-label')
+        .attr('text-anchor', 'middle')
+        .style('fill', '#2c3e50')
+        .style('paint-order', 'stroke')
+        .style('stroke', '#fff')
+        .style('stroke-width', 2)
+        .each(function(d){
+          const text = (d.data && d.data.label) ? String(d.data.label) : '';
+          const lines = Math.max(1, Math.ceil((text || '').length / 20));
+          d3.select(this).attr('y', -(10 + (lines - 1) * 14));
+          const self = d3.select(this);
+          wrapLabelText(self, text, 20, 2);
+        });
+
+      // IP label (if different)
+      labelGroup.append('text')
+        .attr('class', 'ip-label')
+        .attr('text-anchor', 'middle')
+        .style('fill', '#7f8c8d')
+        .style('paint-order', 'stroke')
+        .style('stroke', '#fff')
+        .style('stroke-width', 2)
+        .each(function(d){
+          const labelText = (d.data && d.data.label) ? String(d.data.label) : '';
+          const host = (d.data && d.data.host) ? String(d.data.host) : '';
+          const ip = (d.data && d.data.ip) ? String(d.data.ip) : '';
+          const text = ip && ip !== host && ip !== labelText ? ip : '';
+          const lines = Math.max(1, Math.ceil((text || '').length / 20));
+          d3.select(this).attr('y', 20 + (lines - 1) * 14);
+          const self = d3.select(this);
+          wrapLabelText(self, text, 20, 2);
+        });
+
+      // Tooltip element (create once)
+      let tooltipEl = document.querySelector('.paths-tooltip');
+      if (!tooltipEl) {
+        tooltipEl = document.createElement('div');
+        tooltipEl.className = 'paths-tooltip';
+        document.body.appendChild(tooltipEl);
+      }
+
+      node.on('mouseover', function(event, d){
+        const host = (d.data && d.data.host) ? String(d.data.host) : '';
+        const ip = (d.data && d.data.ip) ? String(d.data.ip) : '';
+        let html = '';
+        if (host) html += host;
+        if (ip && ip !== host) html += (html ? '<br>' : '') + ip;
+        if (!html) html = 'Нет данных';
+        tooltipEl.innerHTML = html;
+        tooltipEl.style.opacity = '1';
+      }).on('mousemove', function(event){
+        const pad = 10;
+        tooltipEl.style.left = (event.clientX + pad) + 'px';
+        tooltipEl.style.top = (event.clientY + pad) + 'px';
+      }).on('mouseout', function(){
+        tooltipEl.style.opacity = '0';
+      });
+
+      // Overlap resolution helpers
+      g.selectAll('.node').each(function(d){
+        d._nodeG = this;
+        d._labelOffset = 0;
+        d3.select(this).select('.label-group').attr('transform', 'translate(0,0)');
+      });
+      function redraw() {
+        g.selectAll('.node').attr('transform', d => `translate(${d.y},${d.x})`);
+        g.selectAll('.link').attr('d', d3.linkHorizontal().x(d => d.y).y(d => d.x));
+      }
+      function fixOverlapsByMovingNodes(root) {
+        const padding = 8;
+        let movedAny = false;
+        const nodes = root.descendants().filter(d => d.depth > 0);
+        nodes.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+        const placed = [];
+        for (const nd of nodes) {
+          const lgNode = d3.select(nd._nodeG).select('.label-group').node();
+          if (!lgNode) continue;
+          const bbox = lgNode.getBBox();
+          let top = nd.x + bbox.y;
+          let bottom = nd.x + bbox.y + bbox.height;
+          const left = nd.y + bbox.x;
+          const right = nd.y + bbox.x + bbox.width;
+          let safety = 0;
+          while (safety++ < 60) {
+            let collided = false;
+            for (const r of placed) {
+              const vOverlap = !(bottom + padding <= r.top || top >= r.bottom + padding);
+              const hOverlap = !(right + padding <= r.left || left >= r.right + padding);
+              if (vOverlap && hOverlap) {
+                const delta = (r.bottom + padding) - top;
+                shiftSubtree(nd, delta);
+                top += delta;
+                bottom += delta;
+                movedAny = true;
+                collided = true;
+                break;
+              }
+            }
+            if (!collided) break;
+          }
+          placed.push({ top, bottom, left, right });
+        }
+        return movedAny;
+      }
+      function updateLabelVisibility(k) {
+        const lg = g.selectAll('.label-group');
+        if (k < 0.9) {
+          lg.style('opacity', 0);
+        } else if (k < 1.2) {
+          lg.style('opacity', 0.85);
+        } else {
+          lg.style('opacity', 1);
+        }
+      }
+      for (let iter = 0; iter < 8; iter++) {
+        const moved = fixOverlapsByMovingNodes(root);
+        redraw();
+        if (!moved) break;
+      }
+      updateLabelVisibility(1);
+    }
+
+    // --------------- FLOWS ---------------
+    async function buildFromDB() {
+      const container = document.getElementById('pathsContainer');
+      container.innerHTML = '<div class="loading">Загрузка дерева...</div>';
+      try {
+        // Выбираем последние уникальные по целям записи и строим ветвящееся дерево
+        const histData = await apiGetHistory();
+        const history = histData.history || [];
+        history.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+        const seenTargets = new Set();
+        const unique = [];
+        for (const item of history) {
+          const t = (item.target || 'unknown').trim().toLowerCase();
+          if (seenTargets.has(t)) continue;
+          seenTargets.add(t);
+          unique.push(item);
+        }
+        const runs = [];
+        for (const u of unique) {
+          try { const det = await apiGetHistoryDetails(u.id); runs.push(det); } catch (e) { /* skip */ }
+        }
+        const root = buildBranchingRootFromRuns(runs);
+        updateCountersFromRuns(runs, root);
+        renderTreeFromRoot(container, root);
+      } catch (e) {
+        container.innerHTML = `<div class="error">Ошибка: ${e.message}</div>`;
+      }
+    }
+
+    function updateCounters(pathsOrRuns, rootData) {
+      // Не используется здесь
+    }
+
+    function updateCountersFromRuns(runs, rootData) {
+      const targets = new Set((runs || []).map(r => (r && r.target ? String(r.target).trim().toLowerCase() : 'unknown')));
+      const targetsCount = targets.size;
+      const hopsCount = (runs || []).reduce((acc, r) => acc + (Array.isArray(r.hops) ? r.hops.length : 0), 0);
+      const nodesCount = (function count(d){ let c=1; (d.children||[]).forEach(ch=>c+=count(ch)); return c; })(rootData);
+      document.getElementById('targetsCount').textContent = targetsCount;
+      document.getElementById('hopsCount').textContent = hopsCount;
+      document.getElementById('nodesCount').textContent = nodesCount;
+    }
+
+    async function buildFromSelection() {
+      const container = document.getElementById('pathsContainer');
+      container.innerHTML = '<div class="loading">Построение из выбранной истории...</div>';
+      const runs = Array.from(selectedIds.values())
+        .map(id => detailsCache.get(id))
+        .filter(det => det && Array.isArray(det.hops));
+      const root = buildBranchingRootFromRuns(runs);
+      updateCountersFromRuns(runs, root);
+      renderTreeFromRoot(container, root);
+    }
+
+    // --------------- INIT ---------------
+    document.addEventListener('DOMContentLoaded', () => {
+      // загрузить историю и дерево из БД по умолчанию
+      loadHistorySidebar();
+      buildFromDB();
+
+      document.getElementById('refreshBtn').addEventListener('click', buildFromDB);
+      document.getElementById('exportBtn').addEventListener('click', async () => {
+        try {
+          const data = await apiGetPaths();
+          const blob = new Blob([JSON.stringify(data.paths || {}, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `network-paths-${new Date().toISOString().split('T')[0]}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+        } catch {
+          alert('Не удалось экспортировать данные');
+        }
+      });
+      document.getElementById('clearDBBtn').addEventListener('click', async () => {
+        if (!confirm('Очистить дерево путей (БД)?')) return;
+        try { await apiClearPathsDB(); buildFromDB(); } catch(e) { alert(e.message); }
+      });
+      document.getElementById('selectNoneBtn').addEventListener('click', () => {
+        selectedIds.clear();
+        const list = document.getElementById('historyList');
+        list.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+        renderSelectedTags();
+      });
+      document.getElementById('buildSelectedBtn').addEventListener('click', buildFromSelection);
+      const pathsBatchBtn = document.getElementById('pathsRunBatchBtn');
+      if (pathsBatchBtn) pathsBatchBtn.addEventListener('click', handlePathsBatchRun);
+
+      
+      // Привязка примеров
+      document.querySelectorAll('.command-examples .example-cmd').forEach(el => {
+        el.addEventListener('click', () => {
+          const input = document.getElementById('pathsCommandInput');
+          input.value = el.textContent;
+          input.focus();
+        });
+      });
+
+      // Отправка команды с этой страницы (как на index)
+      document.getElementById('pathsCommandForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const input = document.getElementById('pathsCommandInput');
+        const cmd = (input.value || '').trim();
+        if (!cmd) return;
+        try {
+          await apiRunCommand(cmd);
+          await loadHistorySidebar();
+          await buildFromDB();
+        } catch (err) {
+          alert(err.message || 'Ошибка запуска команды');
+        }
+      });
+    });
+  </script>
+</body>
+</html>

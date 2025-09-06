@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🌐 Network Visualizer - Визуализатор сетевых команд</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🌐 Network Visualizer</h1>
+            <p class="subtitle">Визуализатор сетевых команд и анализатор маршрутов</p>
+            <div class="global-ip" style="margin-top: 6px; font-size: 14px; color: #2c3e50;">
+                🌍 Ваш внешний IP: <code id="externalIP">—</code>
+            </div>
+        </header>
+
+        <!-- Верхняя панель действий -->
+        <section class="view-controls" style="padding: 12px 24px; background: var(--bg-white); border-bottom: 1px solid var(--border-color);">
+            <div class="view-buttons">
+                <a class="view-btn" href="/paths">
+                    <span class="btn-icon">🌳</span>
+                    Дерево путей
+                </a>
+            </div>
+        </section>
+
+        <!-- Форма ввода команды -->
+        <section class="command-section" style="display: flex; gap: 16px; align-items: flex-start;">
+            <aside id="examplesPanel" class="examples-panel" style="flex: 0 0 25%; max-height: 420px; overflow: auto;">
+                <div class="command-examples">
+                    <div class="examples-header">
+                        <strong>📋 Примеры команд:</strong>
+                        <span class="hint">(кликните для вставки)</span>
+                    </div>
+                    <div class="examples-grid">
+                        <div class="example-category">
+                            <span class="category-title">📍 Traceroute</span>
+                            <div class="example-items">
+                                <code class="example-cmd">traceroute google.com</code>
+                                <code class="example-cmd">traceroute 8.8.8.8</code>
+                                <code class="example-cmd">traceroute 1.1.1.1</code>
+                            </div>
+                        </div>
+                        
+                                                
+                                                
+                                                <div class="example-category">
+                        <span class="category-title">🪟 Windows (cmd/PowerShell)</span>
+                        <div class="example-items">
+                        <code class="example-cmd">tracert example.com</code>
+                        <code class="example-cmd">tracert 8.8.8.8</code>
+                                                </div>
+                        </div>
+                        
+                                            </div>
+                </div>
+            </aside>
+            <form id="commandForm" class="command-form" style="flex: 1 1 50%;">
+                <div class="input-group">
+                    <label for="commandInput">💻 Введите сетевую команду:</label>
+                    <input type="text" id="commandInput" name="command" 
+                           value="traceroute " placeholder="Введите команду (traceroute / tracert)" required>
+                    <button type="submit" class="submit-btn">
+                        <span class="btn-icon">🚀</span>
+                        Выполнить
+                    </button>
+                </div>
+
+                <div class="batch-section" style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+                    <label for="ipListInput">📦 Список IP/доменов для пакетной трассировки (по одному в строке или через запятую):</label>
+                    <textarea id="ipListInput" rows="4" placeholder="Например:\n8.8.8.8\n1.1.1.1\nexample.com" style="width: 100%;"></textarea>
+                    <div class="batch-options" style="display: flex; gap: 12px; align-items: center; margin-top: 8px;">
+                        <label style="display:flex; align-items:center; gap:6px;">
+                            <input type="checkbox" id="batchNumeric"> -n (только IP)
+                        </label>
+                        <label>
+                            Макс. хопов: <input type="number" id="batchMaxHops" min="1" max="64" step="1" style="width: 80px;"> 
+                        </label>
+                        <label>
+                            Таймаут (сек): <input type="number" id="batchWaitMs" min="1" max="30" step="1" style="width: 80px;" placeholder="2"> 
+                        </label>
+                        <button type="button" id="runBatchBtn" class="submit-btn" style="margin-left:auto;">
+                            <span class="btn-icon">🧰</span>
+                            Пакетная трассировка
+                        </button>
+                    </div>
+                    <small class="hint">Лимит: до 50 целей за один запуск</small>
+                </div>
+                
+            </form>
+            <!-- Секция истории запросов (перемещена рядом с формой) -->
+            <section id="historySection" class="history-section" style="flex: 1 1 25%; max-height: 420px; overflow: auto;">
+                <div class="section-header">
+                    <h3>📝 История выполненных запросов</h3>
+                    <div class="history-controls">
+                        <button class="action-btn" id="refreshHistoryBtn" title="Обновить историю">
+                            🔄
+                        </button>
+                        <button class="action-btn danger" id="clearHistoryBtn" title="Очистить историю">
+                            🗑️
+                        </button>
+                    </div>
+                </div>
+
+                <div class="history-filters">
+                    <div class="filter-group">
+                        <label for="historyFilter">Фильтр:</label>
+                        <select id="historyFilter">
+                            <option value="all">Все команды</option>
+                            <option value="traceroute">Traceroute</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="historySort">Сортировка:</label>
+                        <select id="historySort">
+                            <option value="newest">Сначала новые</option>
+                            <option value="oldest">Сначала старые</option>
+                            <option value="target">По цели</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="historyList" class="history-list">
+                    <div class="placeholder">
+                        <div class="placeholder-icon">⏰</div>
+                        <p>История запросов пуста</p>
+                        <small>Выполните traceroute команды чтобы сохранить их в историю</small>
+                    </div>
+                </div>
+            </section>
+        </section>
+
+        <!-- Кнопки переключения видов -->
+        <section class="view-controls">
+            <div class="view-buttons">
+                <button class="view-btn active" data-view="main" id="mainViewBtn">
+                    <span class="btn-icon">📊</span>
+                    Текущая команда
+                </button>
+                                                <button class="view-btn" data-view="info" id="showInfoBtn">
+                    <span class="btn-icon">ℹ️</span>
+                    О программе
+                </button>
+            </div>
+        </section>
+
+        <!-- Главная секция - результаты выполнения команды -->
+        <section id="mainSection" class="content-section">
+            <div class="results-header">
+                <h3>📋 Результаты выполнения</h3>
+                <div class="result-meta" id="resultMeta">
+                    <span class="meta-item" id="commandName">Ожидание команды...</span>
+                    <span class="meta-item" id="executionTime"></span>
+                </div>
+            </div>
+
+            <div class="results-grid">
+                <div class="output-section">
+                    <div class="section-header">
+                        <h4>📄 Сырой вывод команды</h4>
+                        <button class="copy-btn" id="copyOutputBtn" title="Копировать вывод">
+                            📋
+                        </button>
+                    </div>
+                    <div id="rawOutput" class="output-box">
+                        <div class="placeholder">
+                            <div class="placeholder-icon">📝</div>
+                            <p>Здесь будет отображаться вывод команды</p>
+                            <small>Выполните команду чтобы увидеть результаты</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="visualization-section">
+                    <div class="section-header">
+                        <h4>📊 Графическое представление</h4>
+                        <div class="visualization-controls">
+                            <button class="control-btn" id="zoomInBtn" title="Увеличить">➕</button>
+                            <button class="control-btn" id="zoomOutBtn" title="Уменьшить">➖</button>
+                            <button class="control-btn" id="resetViewBtn" title="Сбросить вид">🔄</button>
+                        </div>
+                    </div>
+                    <div id="visualization" class="visualization-box">
+                        <div class="placeholder">
+                            <div class="placeholder-icon">📈</div>
+                            <p>Здесь будет графическая схема</p>
+                            <small>Команды traceroute отобразятся в виде графа сети</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        
+        
+        <!-- Секция информации о программе -->
+        <section id="infoSection" class="content-section">
+            <div class="info-content">
+                <h3>ℹ️ О программе Network Visualizer</h3>
+                
+                <div class="info-grid">
+                    <div class="info-card large">
+                        <h4>🎯 Возможности</h4>
+                        <ul class="features-list">
+                            <li>📊 Визуализация сетевых команд (traceroute/tracert)</li>
+                            <li>💾 Автоматическое сохранение истории запросов</li>
+                            <li>🌳 Построение дерева сетевых путей</li>
+                            <li>📈 Графическое представление сетевой топологии</li>
+                            <li>⚡ Быстрый доступ к предыдущим результатам</li>
+                            <li>📱 Адаптивный интерфейс для мобильных устройств</li>
+                        </ul>
+                    </div>
+
+                    <div class="info-card">
+                        <h4>🛠️ Технологии</h4>
+                        <div class="tech-stack">
+                            <div class="tech-item">
+                                <span class="tech-icon">🐍</span>
+                                <span>Python Flask</span>
+                            </div>
+                            <div class="tech-item">
+                                <span class="tech-icon">🗄️</span>
+                                <span>SQLite Database</span>
+                            </div>
+                            <div class="tech-item">
+                                <span class="tech-icon">📊</span>
+                                <span>D3.js Visualization</span>
+                            </div>
+                            <div class="tech-item">
+                                <span class="tech-icon">🎨</span>
+                                <span>CSS3 + JavaScript</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="info-card">
+                        <h4>📋 Поддерживаемые команды</h4>
+                        <div class="commands-list">
+                            <code>traceroute</code>
+                            <code>tracert</code>
+                        </div>
+                    </div>
+
+                    <div class="info-card">
+                        <h4>📊 Статистика</h4>
+                        <div class="stats-list">
+                            <div class="stat-item">
+                                <span class="stat-value" id="totalRequests">0</span>
+                                <span class="stat-label">всего запросов</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-value" id="dbSize">0 KB</span>
+                                <span class="stat-label">размер базы данных</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-value" id="appUptime">00:00:00</span>
+                                <span class="stat-label">время работы</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="footer-info">
+                    <p>🔄 <strong>Статус системы:</strong> <span id="systemStatus">✅ Работает нормально</span></p>
+                    <p>📦 <strong>Версия:</strong> 1.0.0 | <strong>Последнее обновление:</strong> <span id="lastUpdate">2024</span></p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Футер -->
+        <footer class="footer">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>🌐 Network Visualizer</h4>
+                    <p>Мощный инструмент для анализа и визуализации сетевой инфраструктуры</p>
+                </div>
+                <div class="footer-section">
+                    <h4>⚡ Быстрые действия</h4>
+                    <div class="quick-actions">
+                        <button class="quick-btn" id="quickTraceroute">📍 Traceroute</button>
+                    </div>
+                </div>
+                <div class="footer-section">
+                    <h4>📊 Статус</h4>
+                    <div class="status-indicators">
+                        <span class="status-item online">🟢 Backend</span>
+                        <span class="status-item online">🟢 Database</span>
+                        <span class="status-item" id="frontendStatus">🟡 Frontend</span>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>© 2024 Network Visualizer | Сделано с ❤️ для сетевых администраторов</p>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Модальное окно для подтверждения очистки истории -->
+    <div id="confirmModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>⚠️ Подтверждение действия</h3>
+                <button class="modal-close" id="modalCloseBtn">×</button>
+            </div>
+            <div class="modal-body">
+                <p>Вы уверены, что хотите очистить всю историю запросов?</p>
+                <p class="modal-warning">Это действие невозможно отменить!</p>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-btn secondary" id="modalCancelBtn">Отмена</button>
+                <button class="modal-btn danger" id="modalConfirmBtn">Очистить историю</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <p>Выполнение команды...</p>
+            <small id="loadingDetails">Обработка запроса</small>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script>
+      document.addEventListener('DOMContentLoaded', async function() {
+        try {
+          const resp = await fetch('/api/network_info');
+          const data = await resp.json().catch(() => ({}));
+          const el = document.getElementById('externalIP');
+          if (el) el.textContent = (resp.ok && data && data.external_ip) ? data.external_ip : 'Unknown';
+        } catch (e) {
+          const el = document.getElementById('externalIP');
+          if (el) el.textContent = 'Unknown';
+        }
+      });
+    </script>
+</body>
+</html>
