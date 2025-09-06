@@ -1,12 +1,17 @@
+# The project was created for fun
+
+# There are nuances with displaying information
+
+# In pranas, change to MTR (trackeroute)
+
 # Works well on Linux
 
 # Windows has bugs, still being improved
 
 
+
 Ubuntu
 sudo apt install traceroute
-
-
 
 sudo apt install python3.12-venv -y
 
