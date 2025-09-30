@@ -1,5 +1,7 @@
 # The project was created for fun
 
+# The project was fully supported by artificial intelligence.
+
 # There are nuances with displaying information
 
 # In pranas, change to MTR (trackeroute)
