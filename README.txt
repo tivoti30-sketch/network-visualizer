@@ -1,10 +1,10 @@
 # The project was created for fun
 
-# The project was fully supported by artificial intelligence.
+# The project was fully supported by artificial intelligence
 
 # There are nuances with displaying information
 
-# In pranas, change to MTR (trackeroute)
+# You plan to switch to MTR (traceroute)
 
 # Works well on Linux
 
